@@ -1,0 +1,14 @@
+services:
+  diaryhero:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: diaryhero
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APP_ENV: development
+      DATABASE_PATH: /app/data/diaryhero.db
+    volumes:
+      - ./data:/app/data
