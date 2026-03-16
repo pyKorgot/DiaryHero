@@ -12,11 +12,13 @@
 - миграции и сид одного героя
 - scheduler с периодическими тиками
 - rule-based simulation engine
+- несколько локаций и перемещение героя между ними
 - запись `ticks`, `world_events`, `journal_entries`
 - генерация текста через `OpenRouter`
 - fallback на локальный stub, если LLM недоступна
-- Telegram bot c polling, `/start` и `/chatid`
-- отправка generated diary entry в Telegram, если задан `TELEGRAM_DEFAULT_CHAT_ID`
+- Telegram bot c polling для публикации только в каналы
+- автоматическое сохранение обнаруженных Telegram-каналов в SQLite
+- отправка generated diary entry в Telegram через автоматически обнаруженный channel target
 
 ## Текущий поток работы
 
@@ -28,7 +30,7 @@ Scheduler -> Tick -> Simulation -> WorldEvent -> Narrator -> JournalEntry -> Tel
 
 1. создает запись в `ticks`
 2. выбирает событие из `event_types`
-3. обновляет `hero_state`
+3. при необходимости перемещает героя в новую локацию и обновляет `hero_state`
 4. сохраняет `world_events`
 5. генерирует текст дневника
 6. сохраняет `journal_entries`
@@ -73,7 +75,7 @@ cp .env.example .env
 APP_ENV=development
 LOG_LEVEL=info
 DATABASE_PATH=data/diaryhero.db
-TICK_INTERVAL=15s
+TICK_INTERVAL=15m
 
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_API_KEY=
@@ -84,13 +86,12 @@ OPENROUTER_APP_NAME=DiaryHero
 OPENROUTER_TIMEOUT=30s
 
 TELEGRAM_BOT_TOKEN=
-TELEGRAM_DEFAULT_CHAT_ID=
 TELEGRAM_MODE=polling
 ```
 
 Если `OPENROUTER_API_KEY` пустой, сервис будет использовать локальный stub-текст.
 
-Если `TELEGRAM_BOT_TOKEN` или `TELEGRAM_DEFAULT_CHAT_ID` не заданы, сервис продолжит работать без публикации в Telegram.
+Если `TELEGRAM_BOT_TOKEN` не задан, сервис продолжит работать без публикации в Telegram.
 
 ### 2. Запустить проект
 
@@ -127,14 +128,13 @@ make run
 ```env
 APP_ENV=development
 LOG_LEVEL=info
-TICK_INTERVAL=15s
+TICK_INTERVAL=15m
 
 OPENROUTER_API_KEY=your_openrouter_key
 OPENROUTER_PRIMARY_MODEL=openrouter/auto
 OPENROUTER_FALLBACK_MODEL=openrouter/auto
 
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-TELEGRAM_DEFAULT_CHAT_ID=your_chat_id_or_channel_username
 ```
 
 `DATABASE_PATH` вручную задавать не обязательно: в compose он уже направлен в `/app/data/diaryhero.db` внутри контейнера.
@@ -177,32 +177,17 @@ make docker-down
 
 ## Настройка Telegram
 
-### Личный чат
-
-1. Создай бота через `@BotFather`
-2. Запиши токен в `TELEGRAM_BOT_TOKEN`
-3. Запусти сервис: `make run`
-4. Открой бота в Telegram и отправь `/start`
-5. Бот ответит с `chat_id`
-6. Запиши это значение в `TELEGRAM_DEFAULT_CHAT_ID`
-7. Перезапусти сервис
-
-После этого новые diary entries начнут отправляться в этот чат.
-
-### Группа
-
-1. Добавь бота в группу
-2. Убедись, что у него есть право отправлять сообщения
-3. Получи `chat_id` группы через `/start` или `/chatid`
-4. Укажи `TELEGRAM_DEFAULT_CHAT_ID`
-5. Перезапусти сервис
+Сейчас бот работает только с каналами.
 
 ### Канал
 
 1. Добавь бота в канал как администратора
 2. Дай право публиковать сообщения
-3. Укажи `TELEGRAM_DEFAULT_CHAT_ID` как numeric `chat_id` или `@channel_username`
-4. Перезапусти сервис
+3. После добавления бот получит membership update и сохранит канал в SQLite
+4. Если это первый доступный канал, он станет целью публикации автоматически
+5. После этого новые diary entries начнут публиковаться в этот канал автоматически
+
+Если каналов несколько, сервис использует канал, сохраненный в SQLite как default/актуальный target.
 
 ## Основные env-переменные
 
@@ -226,7 +211,6 @@ make docker-down
 ### Telegram
 
 - `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_DEFAULT_CHAT_ID`
 - `TELEGRAM_MODE`
 
 ## Что видно в логах
@@ -243,8 +227,8 @@ make docker-down
 ## Что дальше можно развивать
 
 - outbox и retry для Telegram delivery
-- хранение `chat_id` в БД вместо ручного env-конфига
+- улучшение выбора target-канала при нескольких подключенных каналах
 - memory layer и anti-repeat логика
-- публикацию в канал и личные чаты по подписке
+- outbox и retries для устойчивой отправки в каналы
 - admin/debug endpoints
 - поддержку нескольких героев

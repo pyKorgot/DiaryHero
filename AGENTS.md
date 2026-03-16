@@ -63,15 +63,14 @@ OpenRouter:
 Telegram:
 
 - `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_DEFAULT_CHAT_ID`
 - `TELEGRAM_MODE`
 
 ## Behavior Notes
 
 - If `OPENROUTER_API_KEY` is missing, narration falls back to a local stub template.
 - If `TELEGRAM_BOT_TOKEN` is missing, Telegram bot startup is skipped.
-- If `TELEGRAM_DEFAULT_CHAT_ID` is empty, the app still runs, but publishing logs a warning instead of failing the tick.
-- Default local tick interval is intentionally short for development (`15s` unless overridden).
+- If no channel has been auto-discovered yet, Telegram publishing remains inactive until the bot is added to a channel.
+- Default tick interval is `15m` unless overridden.
 
 ## Database Notes
 
@@ -86,6 +85,7 @@ Current important tables:
 - `ticks`
 - `world_events`
 - `journal_entries`
+- `telegram_chats`
 - `outbox` (reserved for later delivery pipeline work)
 
 Migrations live in `internal/storage/sqlite/migrations`.
@@ -108,15 +108,16 @@ Migrations live in `internal/storage/sqlite/migrations`.
 
 ## Telegram Notes
 
-- `/start` currently replies with the detected `chat_id`.
-- `/chatid` returns the current chat id.
+- The bot is channel-oriented and does not expose interactive commands anymore.
+- Discovered channels are persisted in SQLite in `telegram_chats`.
 - For channels, the bot must be added as admin with permission to post.
-- For groups, the bot needs permission to send messages.
+- Group/private chat workflows are intentionally disabled.
+- Publishing target is resolved from auto-discovered channels stored in SQLite, not from env.
 
 ## Good Next Steps
 
 - Add outbox-based Telegram delivery and retries
-- Persist discovered Telegram chat ids in SQLite
+- Improve target channel selection when multiple channels exist
 - Add memory/continuity layer
 - Add anti-repeat event logic
 - Add tests for simulation and narration fallback behavior

@@ -6,6 +6,7 @@ type Hero struct {
 	ID         int64
 	Name       string
 	Archetype  string
+	Gender     string
 	VoiceStyle string
 	CreatedAt  time.Time
 }
@@ -24,15 +25,16 @@ type NarrativeOutput struct {
 }
 
 type HeroState struct {
-	HeroID       int64
-	LocationID   int64
-	Health       int
-	Energy       int
-	Stress       int
-	Gold         int
-	CurrentTime  string
-	UpdatedAt    time.Time
-	LocationCode string
+	HeroID        int64
+	LocationID    int64
+	Health        int
+	Energy        int
+	Stress        int
+	Gold          int
+	CurrentTime   string
+	UpdatedAt     time.Time
+	LocationCode  string
+	LocationTitle string
 }
 
 type Tick struct {
@@ -80,4 +82,15 @@ type JournalEntry struct {
 	Status            string
 	PublishedAt       *time.Time
 	CreatedAt         time.Time
+}
+
+type TelegramChat struct {
+	ChatID    string
+	ChatType  string
+	Title     string
+	Username  string
+	IsDefault bool
+	Source    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }

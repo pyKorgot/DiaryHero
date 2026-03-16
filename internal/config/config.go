@@ -30,9 +30,8 @@ type OpenRouterConfig struct {
 }
 
 type TelegramConfig struct {
-	BotToken      string
-	DefaultChatID string
-	Mode          string
+	BotToken string
+	Mode     string
 }
 
 func Load() (Config, error) {
@@ -40,7 +39,7 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("load .env: %w", err)
 	}
 
-	tickInterval, err := durationFromEnv("TICK_INTERVAL", 15*time.Second)
+	tickInterval, err := durationFromEnv("TICK_INTERVAL", 15*time.Minute)
 	if err != nil {
 		return Config{}, err
 	}
@@ -70,9 +69,8 @@ func Load() (Config, error) {
 			Timeout:       openRouterTimeout,
 		},
 		Telegram: TelegramConfig{
-			BotToken:      os.Getenv("TELEGRAM_BOT_TOKEN"),
-			DefaultChatID: os.Getenv("TELEGRAM_DEFAULT_CHAT_ID"),
-			Mode:          stringFromEnv("TELEGRAM_MODE", "polling"),
+			BotToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
+			Mode:     stringFromEnv("TELEGRAM_MODE", "polling"),
 		},
 	}, nil
 }

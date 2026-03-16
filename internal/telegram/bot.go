@@ -2,43 +2,54 @@ package telegram
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 	"sync"
 
 	"diaryhero/internal/config"
+	"diaryhero/internal/domain"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 )
 
 type Bot struct {
-	logger        *slog.Logger
-	b             *tgbot.Bot
-	defaultChatID string
-	enabled       bool
-	startOnce     sync.Once
-	startErr      error
+	logger    *slog.Logger
+	b         *tgbot.Bot
+	chatRepo  domain.TelegramChatRepository
+	enabled   bool
+	startOnce sync.Once
+	startErr  error
 }
 
-func New(cfg config.TelegramConfig, logger *slog.Logger) (*Bot, error) {
+func New(cfg config.TelegramConfig, logger *slog.Logger, chatRepo domain.TelegramChatRepository) (*Bot, error) {
 	client := &Bot{
-		logger:        logger,
-		defaultChatID: cfg.DefaultChatID,
-		enabled:       cfg.BotToken != "",
+		logger:   logger,
+		chatRepo: chatRepo,
+		enabled:  cfg.BotToken != "",
 	}
 
 	if !client.enabled {
 		return client, nil
 	}
 
-	b, err := tgbot.New(cfg.BotToken)
+	allowedUpdates := tgbot.AllowedUpdates{
+		models.AllowedUpdateChannelPost,
+		models.AllowedUpdateMyChatMember,
+	}
+
+	b, err := tgbot.New(cfg.BotToken,
+		tgbot.WithDefaultHandler(client.handleDefault),
+		tgbot.WithAllowedUpdates(allowedUpdates),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create telegram bot: %w", err)
 	}
 
 	client.b = b
-	client.registerHandlers()
 
 	return client, nil
 }
@@ -63,12 +74,14 @@ func (b *Bot) PublishText(ctx context.Context, text string) error {
 	if !b.Enabled() {
 		return fmt.Errorf("telegram bot is not configured")
 	}
-	if b.defaultChatID == "" {
-		return fmt.Errorf("telegram default chat id is not configured")
+
+	chatID, err := b.resolveTargetChatID(ctx)
+	if err != nil {
+		return err
 	}
 
-	_, err := b.b.SendMessage(ctx, &tgbot.SendMessageParams{
-		ChatID: b.defaultChatID,
+	_, err = b.b.SendMessage(ctx, &tgbot.SendMessageParams{
+		ChatID: normalizeChatID(chatID),
 		Text:   text,
 	})
 	if err != nil {
@@ -78,55 +91,100 @@ func (b *Bot) PublishText(ctx context.Context, text string) error {
 	return nil
 }
 
-func (b *Bot) registerHandlers() {
-	b.b.RegisterHandler(tgbot.HandlerTypeMessageText, "/start", tgbot.MatchTypeExact, b.handleStart)
-	b.b.RegisterHandler(tgbot.HandlerTypeMessageText, "", tgbot.MatchTypeContains, b.handleAnyMessage)
-}
-
-func (b *Bot) handleStart(ctx context.Context, bot *tgbot.Bot, update *models.Update) {
-	if update.Message == nil {
+func (b *Bot) handleDefault(ctx context.Context, _ *tgbot.Bot, update *models.Update) {
+	if update == nil {
 		return
 	}
 
-	chatID := update.Message.Chat.ID
-	chatType := update.Message.Chat.Type
-	text := fmt.Sprintf(
-		"DiaryHero подключен. chat_id: %d\n\nЧтобы публиковать сюда записи, укажи TELEGRAM_DEFAULT_CHAT_ID=%d и перезапусти сервис.",
-		chatID,
-		chatID,
-	)
-
-	if chatType != "private" {
-		text += "\n\nЕсли это группа или канал, убедись, что у бота есть права на отправку сообщений."
-	}
-
-	if _, err := bot.SendMessage(ctx, &tgbot.SendMessageParams{ChatID: chatID, Text: text}); err != nil {
-		b.logger.Error("failed to reply to /start", "error", err)
+	if update.ChannelPost != nil {
+		if _, err := b.registerChat(ctx, update.ChannelPost.Chat, "channel_post", false); err != nil {
+			b.logger.Warn("failed to register telegram channel chat", "error", err)
+		}
 		return
 	}
 
-	b.logger.Info("telegram /start received", "chat_id", chatID, "chat_type", chatType)
-}
-
-func (b *Bot) handleAnyMessage(ctx context.Context, bot *tgbot.Bot, update *models.Update) {
-	if update.Message == nil {
-		return
-	}
-
-	b.logger.Info(
-		"telegram message received",
-		"chat_id", update.Message.Chat.ID,
-		"chat_type", update.Message.Chat.Type,
-		"text", update.Message.Text,
-	)
-
-	if update.Message.Text == "/chatid" {
-		_, err := bot.SendMessage(ctx, &tgbot.SendMessageParams{
-			ChatID: update.Message.Chat.ID,
-			Text:   fmt.Sprintf("Текущий chat_id: %d", update.Message.Chat.ID),
-		})
+	if update.MyChatMember != nil {
+		setAsDefault, err := b.registerChat(ctx, update.MyChatMember.Chat, "membership", update.MyChatMember.Chat.Type == models.ChatTypeChannel)
 		if err != nil {
-			b.logger.Error("failed to reply with chat id", "error", err)
+			b.logger.Warn("failed to register telegram membership chat", "error", err)
+			return
+		}
+		b.logger.Info(
+			"telegram chat membership updated",
+			"chat_id", update.MyChatMember.Chat.ID,
+			"chat_type", update.MyChatMember.Chat.Type,
+			"new_status", update.MyChatMember.NewChatMember.Type,
+			"default_selected", setAsDefault,
+		)
+	}
+}
+
+func (b *Bot) registerChat(ctx context.Context, chat models.Chat, source string, allowAutoDefault bool) (bool, error) {
+	if b.chatRepo == nil {
+		return false, nil
+	}
+	if chat.Type != models.ChatTypeChannel {
+		return false, nil
+	}
+
+	chatID := strconv.FormatInt(chat.ID, 10)
+	telegramChat := domain.TelegramChat{
+		ChatID:   chatID,
+		ChatType: string(chat.Type),
+		Title:    chat.Title,
+		Username: chat.Username,
+		Source:   source,
+	}
+	if telegramChat.Title == "" {
+		telegramChat.Title = strings.TrimSpace(strings.Join([]string{chat.FirstName, chat.LastName}, " "))
+	}
+
+	if err := b.chatRepo.UpsertChat(ctx, telegramChat); err != nil {
+		return false, err
+	}
+
+	if !allowAutoDefault {
+		return false, nil
+	}
+
+	if _, err := b.chatRepo.GetDefaultChatID(ctx); err == nil {
+		return false, nil
+	} else if err != nil && err != sql.ErrNoRows {
+		return false, err
+	}
+
+	if err := b.chatRepo.SetDefaultChat(ctx, chatID); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func (b *Bot) resolveTargetChatID(ctx context.Context) (string, error) {
+	if b.chatRepo != nil {
+		chatID, err := b.chatRepo.GetDefaultChatID(ctx)
+		if err == nil && chatID != "" {
+			return chatID, nil
+		}
+		if err != nil && err != sql.ErrNoRows {
+			return "", fmt.Errorf("resolve default telegram chat: %w", err)
+		}
+
+		chatID, err = b.chatRepo.GetLatestPublishableChannelID(ctx)
+		if err == nil && chatID != "" {
+			return chatID, nil
+		}
+		if err != nil && err != sql.ErrNoRows {
+			return "", fmt.Errorf("resolve latest publishable telegram channel: %w", err)
 		}
 	}
+
+	return "", fmt.Errorf("telegram channel target is not configured; add the bot to a channel as admin")
+}
+
+func normalizeChatID(chatID string) any {
+	if parsed, err := strconv.ParseInt(chatID, 10, 64); err == nil {
+		return parsed
+	}
+	return chatID
 }

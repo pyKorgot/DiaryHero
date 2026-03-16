@@ -35,3 +35,11 @@ type Publisher interface {
 	Enabled() bool
 	PublishText(ctx context.Context, text string) error
 }
+
+type TelegramChatRepository interface {
+	UpsertChat(ctx context.Context, chat TelegramChat) error
+	SetDefaultChat(ctx context.Context, chatID string) error
+	GetDefaultChatID(ctx context.Context) (string, error)
+	GetLatestPublishableChannelID(ctx context.Context) (string, error)
+	GetChatByID(ctx context.Context, chatID string) (TelegramChat, error)
+}

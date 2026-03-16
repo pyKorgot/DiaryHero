@@ -80,9 +80,9 @@ func (r *SimRepository) CreateWorldEventAndApplyState(ctx context.Context, tick 
 	updatedAt := nextState.UpdatedAt.UTC().Format(time.RFC3339)
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE hero_state
-		SET health = ?, energy = ?, stress = ?, gold = ?, current_time = ?, updated_at = ?
+		SET location_id = ?, health = ?, energy = ?, stress = ?, gold = ?, current_time = ?, updated_at = ?
 		WHERE hero_id = ?
-	`, nextState.Health, nextState.Energy, nextState.Stress, nextState.Gold, nextState.CurrentTime, updatedAt, tick.HeroID); err != nil {
+	`, nextState.LocationID, nextState.Health, nextState.Energy, nextState.Stress, nextState.Gold, nextState.CurrentTime, updatedAt, tick.HeroID); err != nil {
 		return domain.WorldEvent{}, domain.HeroState{}, fmt.Errorf("update hero state: %w", err)
 	}
 

@@ -38,9 +38,10 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, err
 
 	tickRepo := sqlite.NewTickRepository(db)
 	journalRepo := sqlite.NewJournalRepository(db)
+	telegramChatRepo := sqlite.NewTelegramChatRepository(db)
 	simRepo := sqlite.NewSimRepository(db)
 	orClient := openrouter.NewClient(cfg.OpenRouter)
-	tgBot, err := telegram.New(cfg.Telegram, logger)
+	tgBot, err := telegram.New(cfg.Telegram, logger, telegramChatRepo)
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -75,7 +76,7 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	if a.tgBot != nil && a.tgBot.Enabled() {
-		a.logger.Info("telegram bot configured", "mode", a.config.Telegram.Mode, "default_chat_id", a.config.Telegram.DefaultChatID)
+		a.logger.Info("telegram bot configured", "mode", a.config.Telegram.Mode)
 		if err := a.tgBot.Start(ctx); err != nil {
 			return err
 		}
